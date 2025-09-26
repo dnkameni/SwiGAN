@@ -1,0 +1,62 @@
+default_language_version:
+  python: python3.11
+exclude: ".*/notebooks/"
+default_stages: [pre-commit]
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: debug-statements
+      - id: check-ast
+      - id: check-case-conflict
+      - id: check-builtin-literals
+      - id: check-docstring-first
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v4.0.0-alpha.8
+    hooks:
+      - id: prettier
+        name: prettier (YAML, Markdown, JSON)
+        files: \.(yaml|yml|json|md)$
+        args:
+          - --print-width=100
+          - --prose-wrap=always
+          - --tab-width=2
+  - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
+    rev: v2.14.0
+    hooks:
+      - id: pretty-format-toml
+        name: pretty-format-toml (TOML)
+        args: ["--autofix"]
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        name: mypy
+        args:
+          - --disallow-untyped-defs
+          - --check-untyped-defs
+          - --ignore-missing-imports
+          - --disable-error-code=attr-defined
+        additional_dependencies:
+          - types-requests
+          - types-PyYAML
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.3
+    hooks:
+      - id: ruff
+        name: ruff (python)
+        args: [--fix, --exit-non-zero-on-fix]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.3
+    hooks:
+      - id: ruff-format
+        name: ruff-format (python)

@@ -1,0 +1,75 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = ["setuptools<78"]
+
+[project]
+authors = [
+  {name = "Dider Ngatcha", email = "bakouengit@gmail.com"},
+  {name = "Nkameni Daniel", email = "nkamenidaniel2035@gmail.com"}
+]
+dependencies = [
+  "numpy >= 1.26.4, <2.3.0",
+  "pandas == 2.2.3",
+  "tqdm == 4.67.0",
+  "scikit-learn == 1.6.1",
+  "hydra-core == 1.3.2",
+  "omegaconf == 2.3.0",
+  "torch == 2.5.1",
+  "torchvision == 0.20.1",
+  "torchmetrics == 1.6.3",
+  "lightning == 2.5.1"
+]
+description = "Packages for generative SWI models"
+name = "swigan"
+readme = "README.md"
+requires-python = ">=3.11, <3.13"
+version = "0.0.1"
+
+[project.optional-dependencies]
+dev = [
+  "mypy >= 1.11.2",
+  "pre-commit >= 3.2.0, <4",
+  "pytest >= 7.2.1, <8",
+  "pytest-cov >= 4.0.0, < 5",
+  "ruff >= 0.6.9",
+  "ipython >= 8.31.0",
+  "matplotlib >= 3.10.1",
+  "seaborn >=0.13.2",
+  "ipywidgets >=8.1.0, <9"
+]
+
+[tool.ruf.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff]
+line-length = 100
+show-fixes = true
+
+[tool.ruff.lint]
+ignore = ["ANN101", "ANN102", "ANN401"]
+ignore-init-module-imports = true
+select = [
+  "A",  # flake8-builtins
+  "ANN",  # flake8-annoptations
+  "B",  # flake8-bugbear
+  "C4",  # flake8-comprehensions
+  "C90",  # mccabe
+  "D",  # pydocstyle
+  "E",  # pydocstyale: error
+  "F",  # Pyflakes
+  "I001",  # isort
+  "N",  # pep8-naming
+  "PT",  # flake8-pytest-style
+  "UP",  # pyupgrade
+  "W"  # pydocstyle: warning
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F403"]
+
+[tool.setuptools.packages.find]
+include = ["swigan*"]
+namespaces = false
+
+[tool.uv]
+constraint-dependencies = ["setuptools<78"]
