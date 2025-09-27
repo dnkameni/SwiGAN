@@ -153,7 +153,7 @@ def build_train_val_test_datasets(
     targets_val = (targets_val - y_min) / (y_max - y_min)
     targets_test = (targets_test - y_min) / (y_max - y_min)
 
-    # Division du dataset
+    # Split the dataset
     train_dataset = SWIAutoRegressiveDataset(
         maps_feats=maps_train,
         target_maps=targets_train,
