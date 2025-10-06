@@ -17,7 +17,6 @@ class TemporalDiscriminator(nn.Module):
         Args:
         ----
             input_channels: Number of input channels.
-            num_output_steps: Number of output steps.
 
         """
         super().__init__()
