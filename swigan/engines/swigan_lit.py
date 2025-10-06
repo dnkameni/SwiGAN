@@ -15,8 +15,8 @@ from swigan.models.discriminator.discriminator import (
 )
 from swigan.models.generator.decoder import FrameDecoder
 from swigan.models.generator.encoder import FrameEncoder
-from swigan.models.generator.lstm_decoder import TemporalDecoder
-from swigan.models.generator.lstm_encoder import TemporalEncoder
+from swigan.models.generator.temporal_decoder import TemporalDecoder
+from swigan.models.generator.temporal_encoder import TemporalEncoder
 
 
 class SWIGAN(LightningModule):
@@ -33,9 +33,13 @@ class SWIGAN(LightningModule):
         temporal_dims: int,
         encoder_channels: list[int],
         decoder_channels: list[int],
-        dropout: float,
+        latent_code_dim: int,
+        spatial_dropout: float,
+        temporal_dropout: float,
         apply_center_block: bool,
         z_dim: int,
+        num_temporal_layers: int,
+        rnn_cell_type: str,
         bidirectional: bool,
         lr: float,
         weight_decay: float,
@@ -62,11 +66,16 @@ class SWIGAN(LightningModule):
                 for the frame encoder.
             decoder_channels: The output channels of the convolution blocks
                 for the frame decoder.
-            dropout: The dropout rate to apply after each convolutional block.
+            latent_code_dim: The output dimension of the frame and temporal encoders.
+            spatial_dropout: The dropout rate to apply after each convolutional block
+                in the frame level modules.
+            temporal_dropout: The dropout rate in the rnn encoder and decoder.
             apply_center_block: Whether to apply the center block at the end of the frame
                 encoding.
             z_dim: The input dimension of the noise vector and the output dimension of the
                 temporal decoder.
+            num_temporal_layers: The number of layers in the temporal encoder/decoder.
+            rnn_cell_type: Either 'gru' or 'lstm'.
             bidirectional: Whether to use a bidirectional LSTM for the temporal encoder/decoder.
             lr: Learning rate.
             weight_decay: The weight decay.
@@ -91,31 +100,39 @@ class SWIGAN(LightningModule):
         self.frame_encoder = FrameEncoder(
             in_channels=input_channels + output_channels,
             out_channels=encoder_channels,
-            dropout=dropout,
+            output_dim=latent_code_dim,
+            dropout=spatial_dropout,
             normalization=normalization,
             apply_center_block=apply_center_block,
         )
 
         self.frame_decoder = FrameDecoder(
-            input_dim=z_dim,
+            input_dim=latent_code_dim,
             input_map_dims=input_map_dims,
             output_dim=output_channels,
             decoder_channels=decoder_channels,
-            dropout=dropout,
+            dropout=spatial_dropout,
             normalization=normalization,
         )
 
         self.temporal_encoder = TemporalEncoder(
-            input_dim=encoder_channels[-1],
+            input_dim=latent_code_dim,
             temporal_dim=temporal_dims,
-            hidden_dim=z_dim,
+            hidden_dim=latent_code_dim,
+            dropout=temporal_dropout,
+            num_layers=num_temporal_layers,
+            cell_type=rnn_cell_type,
             bidirectional=bidirectional,
         )
 
         self.temporal_decoder = TemporalDecoder(
-            input_dim=z_dim,
+            input_dim=latent_code_dim,
             temporal_dim=temporal_dims,
-            hidden_dim=z_dim,
+            noise_dim=z_dim,
+            hidden_dim=latent_code_dim,
+            dropout=temporal_dropout,
+            num_layers=num_temporal_layers,
+            cell_type=rnn_cell_type,
             bidirectional=bidirectional,
         )
 
