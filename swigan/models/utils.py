@@ -6,7 +6,7 @@ import torch
 from torch import nn
 
 
-def single_conv_block(
+def single_conv2d_block(
     in_channels: int,
     out_channels: int,
     kernel_size: int | tuple[int],
@@ -72,7 +72,7 @@ class SCSEModule(nn.Module):
     See <https://arxiv.org/abs/1803.02579> for more details.
     """
 
-    def __init__(self, in_channels: int, reduction: int = 16) -> None:
+    def __init__(self, in_channels: int, reduction: int = 8) -> None:
         """Initialize the input class.
 
         Args:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from swigan.models.utils import single_conv_block
+from swigan.models.utils import single_conv2d_block
 
 
 class CenterBlock(nn.Sequential):
@@ -30,7 +30,7 @@ class CenterBlock(nn.Sequential):
                 "instancenorm" for InstanceNorm2D, "batchnorm" for BatchNorm2D.
 
         """
-        conv1 = single_conv_block(
+        conv1 = single_conv2d_block(
             in_channels,
             out_channels,
             kernel_size=3,
@@ -39,7 +39,7 @@ class CenterBlock(nn.Sequential):
             activation=True,
             dropout=dropout,
         )
-        conv2 = single_conv_block(
+        conv2 = single_conv2d_block(
             out_channels,
             out_channels,
             kernel_size=3,
@@ -82,7 +82,7 @@ class FrameEncoder(nn.Module):
         for out in out_channels:
             layers.append(
                 nn.Sequential(
-                    single_conv_block(
+                    single_conv2d_block(
                         in_channels=in_channel,
                         out_channels=out,
                         kernel_size=3,
@@ -90,7 +90,7 @@ class FrameEncoder(nn.Module):
                         normalization=normalization,
                         padding=1,
                     ),
-                    single_conv_block(
+                    single_conv2d_block(
                         in_channels=out,
                         out_channels=out,
                         kernel_size=2,
