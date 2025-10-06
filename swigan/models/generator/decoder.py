@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from torchvision.transforms.functional import center_crop
 
-from swigan.models.utils import SCSEModule, single_conv_block
+from swigan.models.utils import SCSEModule, single_conv2d_block
 
 
 class DecoderBlock(nn.Module):
@@ -53,7 +53,7 @@ class DecoderBlock(nn.Module):
             ),
             nn.LeakyReLU(0.2, inplace=True),
         )
-        self.conv1 = single_conv_block(
+        self.conv1 = single_conv2d_block(
             in_channels,
             out_channels,
             dropout=dropout,
@@ -62,7 +62,7 @@ class DecoderBlock(nn.Module):
             padding=1,
         )
         self.attention1 = SCSEModule(in_channels=in_channels)
-        self.conv2 = single_conv_block(
+        self.conv2 = single_conv2d_block(
             out_channels,
             out_channels,
             dropout=dropout,
@@ -137,7 +137,7 @@ class FrameDecoder(nn.Module):
             for i in range(len(in_channels) - 1)
         ]
         blocks.append(
-            single_conv_block(
+            single_conv2d_block(
                 in_channels=in_channels[-1],
                 out_channels=output_dim,
                 kernel_size=1,
@@ -162,6 +162,8 @@ class FrameDecoder(nn.Module):
 
         """
         # to match the final size of the frame encoder output
+        # Unfortunately this is hard coded sinc the input maps have a fixed
+        # uneven size (37, 44).
         inputs = inputs.repeat(1, 1, 2, 2)
         out = self.decoder(inputs)
         # Crop the final output to match the input maps width and height

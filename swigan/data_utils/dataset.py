@@ -39,7 +39,7 @@ class SWIAutoRegressiveDataset(Dataset):
         self.samples = self._build_samples(
             torch.tensor(maps_feats) * self.mask[None, ...],
             torch.tensor(target_maps) * self.mask[None, ...],
-            torch.tensor(timestamps),
+            torch.tensor(timestamps).long(),
         )
 
     def __len__(self) -> int:
@@ -77,6 +77,7 @@ class SWIAutoRegressiveDataset(Dataset):
             "input_timestamps": self.samples[idx]["input_timestamps"],
             "output_timestamps": self.samples[idx]["output_timestamps"],
             "target_maps": self.samples[idx]["target_maps"],
+            "mask": self.mask[None, ...],
         }
 
 
@@ -146,12 +147,6 @@ def build_train_val_test_datasets(
     maps_train = (maps_train - mean_value) / (std_value + 1e-8)
     maps_val = (maps_val - mean_value) / (std_value + 1e-8)
     maps_test = (maps_test - mean_value) / (std_value + 1e-8)
-
-    # Min Max scaling for the target values
-    y_min, y_max = targets_train.min(), targets_train.max()
-    targets_train = (targets_train - y_min) / (y_max - y_min)
-    targets_val = (targets_val - y_min) / (y_max - y_min)
-    targets_test = (targets_test - y_min) / (y_max - y_min)
 
     # Split the dataset
     train_dataset = SWIAutoRegressiveDataset(
