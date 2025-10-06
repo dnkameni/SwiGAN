@@ -33,8 +33,7 @@ def dataframe_to_rasters(
             )
             y_i = sub_df[target_cols].values.reshape(1, height, width)
 
-            month_norm = (m - 1) / 11.0
-            t_vec = [month_norm]
+            t_vec = [m - 1]
 
             input_maps.append(x_i.astype(np.float32))
             target_maps.append(y_i.astype(np.float32))
