@@ -8,11 +8,11 @@ import torch
 from lightning import LightningModule
 from torch import autograd, nn
 
-from swigan.models.discriminator.discriminator import (
+from swigan.models.discriminator.base_discriminator import (
     BaseDiscriminator,
-    FrameDiscriminator,
-    PatchGANDiscriminator,
 )
+from swigan.models.discriminator.frame_discriminator import FrameDiscriminator
+from swigan.models.discriminator.patch_gan_discriminator import PatchGANDiscriminator
 from swigan.models.generator.decoder import FrameDecoder
 from swigan.models.generator.encoder import FrameEncoder
 from swigan.models.generator.temporal_decoder import TemporalDecoder
@@ -136,9 +136,7 @@ class SWIGAN(LightningModule):
             bidirectional=bidirectional,
         )
 
-        self.base_critic = BaseDiscriminator(
-            input_channels=output_channels, temporal_dim=temporal_dims
-        )
+        self.base_critic = BaseDiscriminator(input_channels=output_channels)
         self.patch_critic = PatchGANDiscriminator(input_channels=64)
         self.frame_critic = FrameDiscriminator(input_channels=64)
 
