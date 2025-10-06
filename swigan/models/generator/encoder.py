@@ -5,7 +5,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from swigan.models.utils import single_conv2d_block
+from swigan.models.utils import SCSEModule, single_conv2d_block
 
 
 class CenterBlock(nn.Sequential):
@@ -45,7 +45,7 @@ class CenterBlock(nn.Sequential):
             kernel_size=3,
             padding=1,
             normalization=normalization,
-            activation=True,
+            activation=False,
             dropout=dropout,
         )
         super().__init__(conv1, conv2)
@@ -58,6 +58,7 @@ class FrameEncoder(nn.Module):
         self,
         in_channels: int,
         out_channels: list[int],
+        output_dim: int,
         dropout: float,
         normalization: str = "batchnorm",
         apply_center_block: bool = False,
@@ -68,6 +69,7 @@ class FrameEncoder(nn.Module):
         ----
             in_channels: Number of input channels.
             out_channels: Number of output_channels.
+            output_dim: Dimension of the output feature after the FC layer.
             dropout: Dropout rate.
             normalization: normalization: The type of normalization to apply.
                 If None, no normalization is applied. Supported normalization are
@@ -79,9 +81,11 @@ class FrameEncoder(nn.Module):
         in_channel = in_channels
         layers = []
         downsample_layers = []
+        proj_layers = []
         for out in out_channels:
             layers.append(
                 nn.Sequential(
+                    SCSEModule(in_channels=in_channel),
                     single_conv2d_block(
                         in_channels=in_channel,
                         out_channels=out,
@@ -93,26 +97,39 @@ class FrameEncoder(nn.Module):
                     single_conv2d_block(
                         in_channels=out,
                         out_channels=out,
-                        kernel_size=2,
-                        stride=2,
+                        kernel_size=3,
                         dropout=dropout,
                         normalization=normalization,
-                        padding=0,
+                        padding=1,
                     ),
+                    SCSEModule(in_channels=out),
                 )
             )
             downsample_layers.append(
+                single_conv2d_block(
+                    in_channels=out,
+                    out_channels=out,
+                    kernel_size=2,
+                    stride=2,
+                    dropout=dropout,
+                    normalization=normalization,
+                    padding=0,
+                ),
+            )
+            proj_layers.append(
                 nn.Conv2d(
                     in_channels=in_channel,
                     out_channels=out,
-                    kernel_size=2,
+                    kernel_size=1,
+                    stride=1,
                     padding=0,
-                    stride=2,
                 )
             )
             in_channel = out
         self.layers = nn.ModuleList(layers)
         self.downsample_layers = nn.ModuleList(downsample_layers)
+        self.proj_layers = nn.ModuleList(proj_layers)
+        self.final_layer = nn.Linear(out_channels[-1], output_dim)
         if apply_center_block:
             self.center = CenterBlock(
                 out_channels[-1],
@@ -133,13 +150,18 @@ class FrameEncoder(nn.Module):
 
         Returns:
         -------
-            A Tensor of shape (batch_size, out_channels)
+            A Tensor of shape (batch_size, output_dim)
 
         """
         out = inputs
-        for block, downsample in zip(self.layers, self.downsample_layers, strict=True):
-            x = downsample(out)
+        for block, downsample, proj in zip(
+            self.layers, self.downsample_layers, self.proj_layers, strict=True
+        ):
+            x = proj(out)
             out = block(out)
             out = out + x
+            out = downsample(out)
         out = self.center(out)
-        return out.mean(dim=(-2, -1))
+        out = out.mean(dim=(-2, -1))
+        out = self.final_layer(out)
+        return out

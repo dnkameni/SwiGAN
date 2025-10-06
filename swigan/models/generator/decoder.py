@@ -162,6 +162,8 @@ class FrameDecoder(nn.Module):
 
         """
         # to match the final size of the frame encoder output
+        # Unfortunately this is hard coded sinc the input maps have a fixed
+        # uneven size (37, 44).
         inputs = inputs.repeat(1, 1, 2, 2)
         out = self.decoder(inputs)
         # Crop the final output to match the input maps width and height
