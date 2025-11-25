@@ -6,7 +6,8 @@ import torch
 from torch import nn
 from torchvision.transforms.functional import center_crop
 
-from modules.utils import SCSEModule, single_conv2d_block
+from modules.base_conv_blocks import single_conv_block
+from modules.scse import SCSEModule
 
 
 class DecoderBlock(nn.Module):
@@ -53,7 +54,7 @@ class DecoderBlock(nn.Module):
             ),
             nn.LeakyReLU(0.2, inplace=True),
         )
-        self.conv1 = single_conv2d_block(
+        self.conv1 = single_conv_block(
             in_channels,
             out_channels,
             dropout=dropout,
@@ -62,7 +63,7 @@ class DecoderBlock(nn.Module):
             padding=1,
         )
         self.attention1 = SCSEModule(in_channels=in_channels)
-        self.conv2 = single_conv2d_block(
+        self.conv2 = single_conv_block(
             out_channels,
             out_channels,
             dropout=dropout,
@@ -137,7 +138,7 @@ class FrameDecoder(nn.Module):
             for i in range(len(in_channels) - 1)
         ]
         blocks.append(
-            single_conv2d_block(
+            single_conv_block(
                 in_channels=in_channels[-1],
                 out_channels=output_dim,
                 kernel_size=1,

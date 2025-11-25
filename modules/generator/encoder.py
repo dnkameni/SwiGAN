@@ -5,7 +5,8 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from modules.utils import SCSEModule, single_conv2d_block
+from modules.base_conv_blocks import single_conv_block
+from modules.scse import SCSEModule
 
 
 class CenterBlock(nn.Sequential):
@@ -30,7 +31,7 @@ class CenterBlock(nn.Sequential):
                 "instancenorm" for InstanceNorm2D, "batchnorm" for BatchNorm2D.
 
         """
-        conv1 = single_conv2d_block(
+        conv1 = single_conv_block(
             in_channels,
             out_channels,
             kernel_size=3,
@@ -39,7 +40,7 @@ class CenterBlock(nn.Sequential):
             activation=True,
             dropout=dropout,
         )
-        conv2 = single_conv2d_block(
+        conv2 = single_conv_block(
             out_channels,
             out_channels,
             kernel_size=3,
@@ -86,7 +87,7 @@ class FrameEncoder(nn.Module):
             layers.append(
                 nn.Sequential(
                     SCSEModule(in_channels=in_channel),
-                    single_conv2d_block(
+                    single_conv_block(
                         in_channels=in_channel,
                         out_channels=out,
                         kernel_size=3,
@@ -94,7 +95,7 @@ class FrameEncoder(nn.Module):
                         normalization=normalization,
                         padding=1,
                     ),
-                    single_conv2d_block(
+                    single_conv_block(
                         in_channels=out,
                         out_channels=out,
                         kernel_size=3,
@@ -106,7 +107,7 @@ class FrameEncoder(nn.Module):
                 )
             )
             downsample_layers.append(
-                single_conv2d_block(
+                single_conv_block(
                     in_channels=out,
                     out_channels=out,
                     kernel_size=2,
