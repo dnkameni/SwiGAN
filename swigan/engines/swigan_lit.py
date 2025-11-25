@@ -5,21 +5,20 @@ from __future__ import annotations
 from typing import Any
 
 import torch
+import torch.nn.functional as F  # noqa
 from lightning import LightningModule
 from torch import autograd, nn
+from torchvision.transforms import v2 as v2_transforms
+from torchvision.transforms.functional import center_crop
 
-from modules.discriminator import (
-    BaseDiscriminator,
-    FrameDiscriminator,
-    PatchGANDiscriminator,
-    TemporalDiscriminator,
-)
-from modules.discriminator.info_gan_network import InfoGANNetwork
-from modules.generator import FrameDecoder, FrameEncoder, TemporalDecoder, TemporalEncoder
-from modules.utils import ModelFlavour
+from modules.diff_augment import DiffAugment
+from modules.discriminator.base_discriminator import BaseDiscriminator
+from modules.discriminator.frame_discriminator import FrameDiscriminator
+from modules.discriminator.patch_gan_discriminator import PatchGANDiscriminator
+from modules.generator.unet_generator import UNetGenerator
 
 
-class SWIGAN(LightningModule):
+class TTTSWIGAN(LightningModule):
     """Lightning module for training the GAN.
 
     The model is trained with a Wasserstein loss with gradient penalty.
@@ -30,26 +29,23 @@ class SWIGAN(LightningModule):
         input_channels: int,
         output_channels: int,
         input_map_dims: list[int],
-        temporal_dims: int,
         encoder_channels: list[int],
         decoder_channels: list[int],
-        latent_code_dim: int,
+        timestamps_dim: int,
         spatial_dropout: float,
-        temporal_dropout: float,
         apply_center_block: bool,
         z_dim: int,
-        num_temporal_layers: int,
-        rnn_cell_type: str,
-        bidirectional: bool,
         lr: float,
         weight_decay: float,
         loss_fn: nn.Module | str,
         optim: torch.optim.Optimizer,
         normalization: str,
         num_critic_iterations_per_epoch: int = 5,
-        lambda_penalty: float = 10,
-        image_distance_weight: float = 1.5,
+        lambda_penalty: float = 10.0,
+        image_distance_weight: float = 100.0,
+        feature_matching_weight: float = 1.5,
         max_epochs: int = 100,
+        min_lr: float = 1e-9,
     ) -> None:
         """Initialize the input arguments.
 
@@ -64,10 +60,10 @@ class SWIGAN(LightningModule):
                 for the frame encoder.
             decoder_channels: The output channels of the convolution blocks
                 for the frame decoder.
+            timestamps_dim: Number of dimensions of the timestamps vector.
+                Encoded using nn.Embedding.
             latent_code_dim: The output dimension of the frame and temporal encoders.
-            spatial_dropout: The dropout rate to apply after each convolutional block
-                in the frame level modules.
-            temporal_dropout: The dropout rate in the rnn encoder and decoder.
+            spatial_dropout: The dropout rate to apply after each convolutional block.
             apply_center_block: Whether to apply the center block at the end of the frame
                 encoding.
             z_dim: The input dimension of the noise vector and the output dimension of the
@@ -87,70 +83,47 @@ class SWIGAN(LightningModule):
                 critic loss.
             image_distance_weight: The weight to apply to the pixel reconstruction
                 loss term.
-            max_epochs: Number of training epochs. Used to set up the Tmax parameter of the
-                CosineAnnealingLR scheculer.
+            feature_matching_weight: Weight to apply to the feature matching term in the loss.
+            max_epochs: Max number o fepochs of the training.
+            min_lr: Minimum learning rate for the CosineAnnelaing scheduler.
+            scheduler_factor: Factor of the scheduler.
+            scheduler_patience: How often to update the learning rate through
+                the scheduler.
+            scheduler_threshold: The minimum threshold on the monitored metric over
+                which the learning rate is updated.
 
         """
         super().__init__()
-        self.time_embedding = nn.Embedding(
-            num_embeddings=12,  # number of months
-            embedding_dim=temporal_dims,
-        )
-        self.frame_encoder = FrameEncoder(
-            in_channels=input_channels + output_channels,
-            out_channels=encoder_channels,
-            output_dim=latent_code_dim,
+        self.timestamps_embedding = nn.Embedding(12, timestamps_dim)
+        self.generator = UNetGenerator(
+            input_dim=input_channels + timestamps_dim,
+            output_dim=output_channels,
+            noise_dim=z_dim,
+            encoder_channels=encoder_channels,
+            decoder_channels=decoder_channels,
             dropout=spatial_dropout,
             normalization=normalization,
             apply_center_block=apply_center_block,
         )
 
-        self.frame_decoder = FrameDecoder(
-            input_dim=latent_code_dim,
-            input_map_dims=input_map_dims,
-            output_dim=output_channels,
-            decoder_channels=decoder_channels,
-            dropout=spatial_dropout,
-            normalization=normalization,
+        self.base_critic = BaseDiscriminator(
+            input_channels=output_channels, output_channels=[32, 64, 128], mbd_output_channels=64
         )
+        self.patch_critic = PatchGANDiscriminator(input_channels=128 + 64)
+        self.frame_critic = FrameDiscriminator(input_channels=128 + 64)
 
-        self.temporal_encoder = TemporalEncoder(
-            input_dim=latent_code_dim,
-            temporal_dim=temporal_dims,
-            hidden_dim=latent_code_dim,
-            dropout=temporal_dropout,
-            num_layers=num_temporal_layers,
-            cell_type=rnn_cell_type,
-            bidirectional=bidirectional,
-        )
-
-        self.temporal_decoder = TemporalDecoder(
-            input_dim=latent_code_dim,
-            temporal_dim=temporal_dims,
-            noise_dim=z_dim,
-            hidden_dim=latent_code_dim,
-            dropout=temporal_dropout,
-            num_layers=num_temporal_layers,
-            cell_type=rnn_cell_type,
-            bidirectional=bidirectional,
-        )
-
-        self.base_critic = BaseDiscriminator(input_channels=output_channels)
-        self.patch_critic = PatchGANDiscriminator(input_channels=64)
-        self.frame_critic = FrameDiscriminator(input_channels=64)
-        self.temporal_critic = TemporalDiscriminator(input_channels=64)
-
-        self.Q_net = InfoGANNetwork(
-            input_channels=64,
-            latent_code_dim=latent_code_dim,
-            temporal_dim=12,
+        self.transforms = v2_transforms.Compose(
+            [
+                v2_transforms.RandomHorizontalFlip(p=0.5),
+                v2_transforms.RandomResizedCrop(input_map_dims, scale=(0.7, 1.0)),
+            ]
         )
 
         if isinstance(loss_fn, str):
             if loss_fn == "l1":
-                self.loss_fn = nn.SmoothL1Loss(reduction="sum")
+                self.loss_fn = nn.L1Loss(reduction="mean")
             elif loss_fn == "mse":
-                self.loss_fn = nn.MSELoss(reduction="sum")
+                self.loss_fn = nn.MSELoss(reduction="mean")
             else:
                 raise NotImplementedError(f"Unknown loss function: {loss_fn}")
         else:
@@ -159,30 +132,12 @@ class SWIGAN(LightningModule):
         self.automatic_optimization = False
         self.save_hyperparameters(ignore="loss_fn")
 
-    @property
-    def description(self) -> str:
-        """A string summarizing the main characteristics of the model."""
-        if self.hparams.encoder_channels[0] == ModelFlavour.Small.value[0][0]:
-            model_flavour = "small"
-        elif self.hparams.encoder_channels[0] == ModelFlavour.Medium.value[0][0]:
-            model_flavour = "medium"
-        else:
-            model_flavour = "large"
-
-        bidirectional = "bidirectional" if self.hparams.bidirectional else "unidirectional"
-
-        return (
-            f"{model_flavour}_{bidirectional}_{self.hparams.rnn_cell_type}"
-            f"_noise_dim{self.hparams.z_dim}_latent_dim{self.hparams.latent_code_dim}_"
-            "input_6_target_12_no_temporal_disc"
-        )
-
     def gradient_penalty(
         self,
         real_maps: torch.Tensor,
         fake_maps: torch.Tensor,
         critic_type: str,
-        alpha: torch.Tensor,
+        alpha: float,
     ) -> torch.Tensor:
         """Gradient penalty to apply to the Wasserstein loss.
 
@@ -192,6 +147,8 @@ class SWIGAN(LightningModule):
                 (batch_size, output_length, output_channels, H, W).
             fake_maps: The maps generated by the generator.
                 Of shape (batch_size, output_length, output_channels, H, W).
+            timesteps: The output timestamps vectors. Of shape
+                (batch_size, output_length, temporal_dims).
             critic_type: Whether the gradient penalty is applied to the
                 patchGAN critic or the frame critic or the temporal critic.
                 Must be one of "patch", "frame", "temporal"
@@ -202,22 +159,20 @@ class SWIGAN(LightningModule):
             The gradient penalty.
 
         """
-        batch_size, output_length = real_maps.shape[:2]
+        batch_size = real_maps.shape[0]
+
         interpolated = alpha * real_maps + (1 - alpha) * fake_maps
         interpolated = (
             interpolated.clone().detach().requires_grad_(True)
         )  # Make it a leaf tensor with grad
-
+        base_output, _ = self.base_critic(interpolated)
         if critic_type == "patch":
-            d_interpolated = self.patch_critic(self.base_critic(interpolated))
+            d_interpolated, _ = self.patch_critic(base_output)
         elif critic_type == "frame":
-            d_interpolated = self.frame_critic(self.base_critic(interpolated))
-        elif critic_type == "temporal":
-            d_interpolated = self.temporal_critic(self.base_critic(interpolated))
+            d_interpolated, _ = self.frame_critic(base_output)
         else:
             raise RuntimeError(
-                f"Unknown critic type: {critic_type}. "
-                f"Please provide one of 'patch', 'frame', 'temporal'."
+                f"Unknown critic type: {critic_type}. " f"Please provide one of 'patch', 'frame'"
             )
         d_interpolated = d_interpolated.requires_grad_(True)
         # Use scalar output for autograd
@@ -235,9 +190,18 @@ class SWIGAN(LightningModule):
         )
         return gradient_penalty
 
+    def compute_feature_loss(
+        self, features_fake: list[torch.Tensor], features_real: list[torch.Tensor]
+    ) -> torch.Tensor:
+        """Compute mse loss between discriminator features of real and fake maps."""
+        loss = 0.0
+        for feature_fake, feature_real in zip(features_fake, features_real, strict=True):
+            loss += torch.nn.functional.mse_loss(feature_fake, feature_real)
+        return loss
+
     def generator_step(
         self, batch: dict[str, torch.Tensor], z: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> dict[str, torch.Tensor]:
         """Run a single generator step.
 
         Args:
@@ -250,54 +214,74 @@ class SWIGAN(LightningModule):
             The generator loss and the pixel distance loss.
 
         """
-        (input_maps, target_maps, input_timestamps, output_timestamps, mask) = (
+        (input_maps, target_maps, input_timestamps, mask) = (
             batch["input_maps"],
             batch["target_maps"],
-            batch["input_timestamps"],
-            batch["output_timestamps"],
+            batch["timestamps"],
             batch["mask"],
         )
 
-        fake_maps, latent_code = self(
+        if self.training:
+            input_maps, target_maps, mask = self.transforms(input_maps, target_maps, mask)
+
+        fake_maps = self(
             input_maps=input_maps,
             input_timestamps=input_timestamps,
-            output_timestamps=output_timestamps,
             mask=mask,
             noise_vector=z,
         )
 
-        base_critic_fake = self.base_critic(fake_maps)
-        patch_critic_fake = self.patch_critic(base_critic_fake)
-        frame_critic_fake = self.frame_critic(base_critic_fake)
-        temporal_critic_fake = self.temporal_critic(base_critic_fake)
-        fake_timestamps, fake_latent_code = self.Q_net(base_critic_fake)
+        if self.training:
+            # Augment images
+            augmented_fake_maps = DiffAugment(fake_maps.contiguous(), policy="translation,cutout")
+            augmented_target_maps = DiffAugment(
+                target_maps.contiguous(), policy="translation,cutout"
+            )
+        else:
+            augmented_fake_maps = fake_maps
+            augmented_target_maps = target_maps
+
+        base_critic_fake, features_base_fake = self.base_critic(augmented_fake_maps)
+        patch_critic_fake, features_patch_fake = self.patch_critic(base_critic_fake)
+        frame_critic_fake, features_frame_fake = self.frame_critic(base_critic_fake)
+
+        base_critic_real, features_base_real = self.base_critic(augmented_target_maps)
+        _, features_patch_real = self.patch_critic(base_critic_real)
+        _, features_frame_real = self.frame_critic(base_critic_real)
+
         # Pixel distance loss
         pixel_distance_loss = self.hparams.image_distance_weight * self.loss_fn(
             fake_maps, target_maps
         )
 
-        # Penalty on the reconstructed timestamps
-        timestamps_penalty = 0.1 * torch.nn.functional.cross_entropy(
-            fake_timestamps.view(-1, fake_timestamps.shape[-1]), output_timestamps.view(-1)
+        # Feature loss
+        feature_loss = self.hparams.feature_matching_weight * (
+            self.compute_feature_loss(features_base_fake, features_base_real)
+            + self.compute_feature_loss(features_patch_fake, features_patch_real)
+            + self.compute_feature_loss(features_frame_fake, features_frame_real)
         )
 
-        # Penalty on the reconstructed latent code
-        latent_code_penalty = 0.1 * torch.nn.functional.mse_loss(fake_latent_code, latent_code)
+        smape = self._compute_smape(target_maps.detach(), fake_maps.detach(), mask.detach())
+        rmse = self._compute_rmse(target_maps.detach(), fake_maps.detach(), mask.detach())
 
         loss_generator = (
             -torch.mean(patch_critic_fake)
             - torch.mean(frame_critic_fake)
-            - torch.mean(temporal_critic_fake)
             + pixel_distance_loss
-            + timestamps_penalty
-            + latent_code_penalty
+            + feature_loss
         )
 
-        return loss_generator, pixel_distance_loss
+        return {
+            "loss_generator": loss_generator,
+            "pixel_distance_loss": pixel_distance_loss,
+            "smape": smape,
+            "rmse": rmse,
+            "feature_loss": feature_loss,
+        }
 
     def critic_step(
         self, batch: dict[str, torch.Tensor], z: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> dict[str, torch.Tensor]:
         """Run a single critic step.
 
         Args:
@@ -307,66 +291,73 @@ class SWIGAN(LightningModule):
 
         Returns:
         -------
-            The Wasserstein loss with gradient penalty.
+            The Wasserstein loss.
 
         """
-        input_maps, target_maps, input_timestamps, output_timestamps, mask = (
+        input_maps, target_maps, input_timestamps, mask = (
             batch["input_maps"],
             batch["target_maps"],
-            batch["input_timestamps"],
-            batch["output_timestamps"],
+            batch["timestamps"],
             batch["mask"],
         )
         device = input_maps.device
         # Generate fake images
 
-        fake_imgs, _ = self(
+        if self.training:
+            input_maps, target_maps, mask = self.transforms(input_maps, target_maps, mask)
+
+        fake_imgs = self(
             input_maps=input_maps,
             input_timestamps=input_timestamps,
-            output_timestamps=output_timestamps,
             mask=mask,
             noise_vector=z,
         )
         fake_imgs = fake_imgs.detach()
-        base_critic_real = self.base_critic(target_maps)
-        base_critic_fake = self.base_critic(fake_imgs)
 
-        patch_critic_real = self.patch_critic(base_critic_real)
-        patch_critic_fake = self.patch_critic(base_critic_fake)
-        frame_critic_real = self.frame_critic(base_critic_real)
-        frame_critic_fake = self.frame_critic(base_critic_fake)
-        temporal_critic_real = self.temporal_critic(base_critic_real)
-        temporal_critic_fake = self.temporal_critic(base_critic_fake)
+        if self.training:
+            # Augment images
+            fake_imgs = DiffAugment(fake_imgs.contiguous(), policy="translation,cutout")
+            target_maps = DiffAugment(target_maps.contiguous(), policy="translation,cutout")
+
+        base_critic_real, _ = self.base_critic(target_maps)
+        base_critic_fake, _ = self.base_critic(fake_imgs)
+
+        patch_critic_real, _ = self.patch_critic(base_critic_real)
+        patch_critic_fake, _ = self.patch_critic(base_critic_fake)
+        frame_critic_real, _ = self.frame_critic(base_critic_real)
+        frame_critic_fake, _ = self.frame_critic(base_critic_fake)
 
         # Compute the losses for each discriminator and aggregate them
         loss_critic_patch = torch.mean(patch_critic_fake) - torch.mean(patch_critic_real)
         loss_critic_frame = torch.mean(frame_critic_fake) - torch.mean(frame_critic_real)
-        loss_critic_temporal = torch.mean(temporal_critic_fake) - torch.mean(temporal_critic_real)
-
-        total_loss_critic = loss_critic_patch + loss_critic_frame + loss_critic_temporal
+        total_loss_critic = loss_critic_patch + loss_critic_frame
 
         if self.training:
             # add gradient penalty
-            batch_size, output_length = target_maps.shape[:2]
-            alpha = torch.rand(batch_size, output_length, 1, 1, 1, device=device)
+            batch_size = target_maps.shape[0]
+            alpha = torch.rand(batch_size, 1, 1, 1, device=device)
             gradient_penalty = self.gradient_penalty(
-                target_maps, fake_imgs, critic_type="patch", alpha=alpha
+                target_maps,
+                fake_imgs,
+                critic_type="patch",
+                alpha=alpha,  # noqa
             )
             gradient_penalty += self.gradient_penalty(
                 target_maps,
                 fake_imgs,
                 critic_type="frame",
-                alpha=alpha,
-            )
-            gradient_penalty += self.gradient_penalty(
-                target_maps,
-                fake_imgs,
-                critic_type="temporal",
-                alpha=alpha,
+                alpha=alpha,  # noqa
             )
             total_loss_critic += gradient_penalty
 
-        return total_loss_critic, loss_critic_patch, loss_critic_frame, loss_critic_temporal
+        return {
+            "total_loss_critic": total_loss_critic,
+            "loss_patch_critic": loss_critic_patch,
+            "loss_frame_critic": loss_critic_frame,
+            "gradient_penalty": gradient_penalty
+            if self.training
+            else torch.tensor(0.0, device=total_loss_critic.device),
+        }
 
     def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         """Run a single training step.
@@ -384,18 +375,30 @@ class SWIGAN(LightningModule):
         batch_size = batch["target_maps"].shape[0]
         opt_generator, opt_critic = self.optimizers()
         z = torch.randn(batch_size, self.hparams.z_dim, device=batch["target_maps"].device)
+
         # Train Critic multiple times
         for _ in range(self.hparams.num_critic_iterations_per_epoch):
             opt_critic.zero_grad()
-            loss_critic, loss_patch_critic, loss_frame_critic, loss_temporal_critic = (
-                self.critic_step(batch, z)
+            critic_outputs = self.critic_step(batch, z)
+            (loss_critic, loss_patch_critic, loss_frame_critic, gradient_penalty) = (
+                critic_outputs["total_loss_critic"],
+                critic_outputs["loss_patch_critic"],
+                critic_outputs["loss_frame_critic"],
+                critic_outputs["gradient_penalty"],
             )
             self.manual_backward(loss_critic)
             opt_critic.step()
 
         # Train Generator
         opt_generator.zero_grad()
-        loss_generator, pixel_distance_loss = self.generator_step(batch, z)
+        generator_outputs = self.generator_step(batch, z)
+        (loss_generator, pixel_distance_loss, smape, rmse, feature_loss) = (
+            generator_outputs["loss_generator"],
+            generator_outputs["pixel_distance_loss"],
+            generator_outputs["smape"],
+            generator_outputs["rmse"],
+            generator_outputs["feature_loss"],
+        )
         self.manual_backward(loss_generator)
         opt_generator.step()
 
@@ -405,11 +408,13 @@ class SWIGAN(LightningModule):
                 "train/total_critic_loss": loss_critic,
                 "train/critic_patch_loss": loss_patch_critic,
                 "train/critic_frame_loss": loss_frame_critic,
-                "train/critic_temporal_loss": loss_temporal_critic,
-                "train/gradient_penalty": loss_critic
-                - (loss_patch_critic + loss_frame_critic + loss_temporal_critic),
+                "train/gradient_penalty": gradient_penalty,
                 "train/generator_loss": loss_generator,
-                "train/generator_pixel_distance_loss": pixel_distance_loss,
+                "train/generator_pixel_distance_loss": pixel_distance_loss
+                / self.hparams.image_distance_weight,
+                "train/feature_loss": feature_loss,
+                "train/generator_smape": smape,
+                "train/generator_rmse": rmse,
             },
             on_epoch=True,
             on_step=True,
@@ -432,28 +437,42 @@ class SWIGAN(LightningModule):
         """
         batch_size = batch["input_maps"].shape[0]
         z = torch.randn(batch_size, self.hparams.z_dim, device=batch["input_maps"].device)
-        loss_critic, loss_patch_critic, loss_frame_critic, loss_temporal_critic = self.critic_step(
-            batch, z
+        critic_outputs = self.critic_step(batch, z)
+        loss_critic, loss_patch_critic, loss_frame_critic = (
+            critic_outputs["total_loss_critic"],
+            critic_outputs["loss_patch_critic"],
+            critic_outputs["loss_frame_critic"],
         )
-        loss_generator, pixel_distance_loss = self.generator_step(batch, z)
+        generator_outputs = self.generator_step(batch, z)
+        (loss_generator, pixel_distance_loss, smape, rmse, feature_loss) = (
+            generator_outputs["loss_generator"],
+            generator_outputs["pixel_distance_loss"],
+            generator_outputs["smape"],
+            generator_outputs["rmse"],
+            generator_outputs["feature_loss"],
+        )
+
         # Logging
         self.log_dict(
             {
                 "val/total_critic_loss": loss_critic,
                 "val/critic_patch_loss": loss_patch_critic,
                 "val/critic_frame_loss": loss_frame_critic,
-                "val/critic_temporal_loss": loss_temporal_critic,
                 "val/generator_loss": loss_generator,
-                "val/generator_pixel_distance_loss": pixel_distance_loss,
+                "val/generator_pixel_distance_loss": pixel_distance_loss
+                / self.hparams.image_distance_weight,
+                "val/feature_loss": feature_loss,
+                "val/generator_smape": smape,
+                "val/generator_rmse": rmse,
             },
             on_epoch=True,
-            on_step=False,
+            on_step=True,
             prog_bar=True,
         )
         return loss_generator
 
     def test_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
-        """Runa single test step.
+        """Run a single test step.
 
         Args:
         ----
@@ -467,22 +486,34 @@ class SWIGAN(LightningModule):
         """
         batch_size = batch["input_maps"].shape[0]
         z = torch.randn(batch_size, self.hparams.z_dim, device=batch["input_maps"].device)
-        loss_critic, loss_patch_critic, loss_frame_critic, loss_temporal_critic = self.critic_step(
-            batch, z
+        critic_outputs = self.critic_step(batch, z)
+        loss_critic, loss_patch_critic, loss_frame_critic = (
+            critic_outputs["total_loss_critic"],
+            critic_outputs["loss_patch_critic"],
+            critic_outputs["loss_frame_critic"],
         )
-        loss_generator, pixel_distance_loss = self.generator_step(batch, z)
+        generator_outputs = self.generator_step(batch, z)
+        (loss_generator, pixel_distance_loss, smape, rmse, feature_loss) = (
+            generator_outputs["loss_generator"],
+            generator_outputs["pixel_distance_loss"],
+            generator_outputs["smape"],
+            generator_outputs["rmse"],
+            generator_outputs["feature_loss"],
+        )
         # Logging
         self.log_dict(
             {
                 "test/total_critic_loss": loss_critic,
                 "test/critic_patch_loss": loss_patch_critic,
                 "test/critic_frame_loss": loss_frame_critic,
-                "test/critic_temporal_loss": loss_temporal_critic,
                 "test/generator_loss": loss_generator,
                 "test/generator_pixel_distance_loss": pixel_distance_loss,
+                "test/feature_loss": feature_loss,
+                "test/generator_smape": smape,
+                "test/generator_rmse": rmse,
             },
             on_epoch=True,
-            on_step=False,
+            on_step=True,
             prog_bar=True,
         )
         return loss_generator
@@ -491,10 +522,9 @@ class SWIGAN(LightningModule):
         self,
         input_maps: torch.Tensor,
         input_timestamps: torch.Tensor,
-        output_timestamps: torch.Tensor,
         mask: torch.Tensor,
         noise_vector: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> torch.Tensor:
         """Run the forward pass.
 
         Args:
@@ -515,100 +545,67 @@ class SWIGAN(LightningModule):
             The generated output maps of shape
             (batch_size, output_length, output_channels, height, width).
 
-        """
-        outputs = self.encode_frames(
-            input_maps
-        )  # (batch_size, num_timesteps, encoder_output_channels)
-        outputs, latent_code = self.generate_trajectory(
-            outputs, input_timestamps, output_timestamps, noise_vector
-        )  # (batch_size, output_length, decoder_input_channels)
-        outputs = self.decode_frames(outputs)  # (batch_size, output_length, output_channels, H, W)
-        return outputs * mask, latent_code
-
-    def encode_frames(self, input_maps: torch.Tensor) -> torch.Tensor:
-        """Pass the input maps through the frame encoder.
-
-        Args:
-        ----
-            input_maps: The input maps as torch Tensors. Of shape
-                (batch_size, input_length, input_channels, height, width)
-
-        Returns:
-        -------
-            The encoded frames. Of shape (batch_size, input_length, out_channels).
 
         """
-        outputs = self.frame_encoder(
-            input_maps.view(-1, *input_maps.shape[2:])
-        )  # (batch_size*num_timesteps, encoder_output_channels)
-        outputs = outputs.view(
-            *input_maps.shape[:2], -1
-        )  # (batch_size, num_timesteps, encoder_output_channels)
-        return outputs
+        batch_size, channels, H, W = input_maps.shape  # noqa
+        timesteps_channels = self.timestamps_embedding(input_timestamps.long())[..., None, None]
+        timesteps_channels = timesteps_channels.expand(-1, -1, H, W).to(input_maps.device)
+        inputs = torch.cat([input_maps, timesteps_channels], dim=1)
+        inputs = F.pad(inputs, (2, 2, 6, 5))
+        outputs = self.generator(
+            inputs=inputs,
+            noise_vector=noise_vector,
+        )
+        outputs = center_crop(outputs, self.hparams.input_map_dims)
+        return outputs * mask
 
-    def decode_frames(self, input_features: torch.Tensor) -> torch.Tensor:
-        """Pass the input maps through the frame decoder.
-
-        Args:
-        ----
-            input_features: Input features coming from the temporal decoder.
-                Of shape (batch_size, output_length, z_dim)
-
-        Returns:
-        -------
-            The decoded frames. Of shape (batch_size, output_length, output_channels, height, width)
-
-        """
-        outputs = input_features.reshape(-1, input_features.shape[-1])[
-            ..., None, None
-        ]  # (batch_size*num_timesteps, decoder_input_channels, 1, 1)
-        outputs = self.frame_decoder(
-            outputs
-        )  # (batch_size*num_timesteps, decoder_output_channels, H, W)
-        outputs = outputs.reshape(
-            *input_features.shape[:2], *outputs.shape[1:]
-        )  # (batch_size, num_timesteps, encoder_output_channels, H, W)
-        return outputs
-
-    def generate_trajectory(
+    def _compute_smape(
         self,
-        feature_maps: torch.Tensor,
-        input_timestamps: torch.Tensor,
-        output_timestamps: torch.Tensor,
-        noise_vector: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Generate output features to pass through the frame decoder.
+        y_true: torch.Tensor,
+        y_pred: torch.Tensor,
+        mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute mean symmetric absolute percentage error."""
+        mean_v, std_v = (
+            torch.tensor(self.targets_mean_value).to(y_true.device),
+            torch.tensor(self.targets_std_value).to(y_true.device),
+        )
 
-        Args:
-        ----
-            feature_maps: The feature maps from the frame decoder. Of shape
-                (batch_size, input_length, encoder_output_channels).
-            input_timestamps: The timesteps vectors corresponding to each input map.
-                Must be of shape (batch_size, input_length, temporal_dim).
-            output_timestamps: The timesteps vectors corresponding to outputs.
-                Must be of shape (batch_size, output_length, temporal_dim).
-            noise_vector: A noise vector for stochasticity in the predictions. If
-                None a vector will be generated from the standard normal distribution.
-                Must be of shape (batch_size, z_dim).
+        y_true_p, y_pred_p = y_true * std_v + mean_v, y_pred * std_v + mean_v
+        absolute_diff = torch.abs(y_true_p - y_pred_p)
+        denominator = (torch.abs(y_true_p) + torch.abs(y_pred_p)) / 2
 
-        Returns:
-        -------
-            A tensor of shape (batch_size, output_length, z_dim).
+        mape = absolute_diff / (denominator + 1e-8)
+        masked_mape = mape * mask
+        masked_mape = masked_mape.sum(dim=(-2, -1)) / (mask.sum(dim=(-2, -1)) + 1e-8)
+        masked_mape = masked_mape.mean()
+        return 100 * masked_mape
 
-        """
-        input_timestamps_embeddings = self.time_embedding(input_timestamps).squeeze(dim=-2)
-        output_timestamps_embeddings = self.time_embedding(output_timestamps).squeeze(dim=-2)
-        latent_code = self.temporal_encoder(
-            feature_maps, input_timestamps_embeddings
-        )  # (batch_size, latent_code_dim)
-        outputs = self.temporal_decoder(
-            latent_code, output_timestamps_embeddings, noise_vector
-        )  # (batch_size, output_length, latent_code_dim)
-        return outputs, latent_code
+    def _compute_rmse(
+        self,
+        y_true: torch.Tensor,
+        y_pred: torch.Tensor,
+        mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute spatial RMSE per predictions timestep."""
+        n_elements = mask.sum(dim=(-2, -1))
+        mean_v, std_v = (
+            torch.tensor(self.targets_mean_value).to(y_true.device),
+            torch.tensor(self.targets_std_value).to(y_true.device),
+        )
+
+        y_true_p, y_pred_p = y_true * std_v + mean_v, y_pred * std_v + mean_v
+
+        masked_y_pred = y_pred_p * mask
+        masked_y_true = y_true_p * mask
+
+        mean_rmse = ((masked_y_true - masked_y_pred) ** 2).sum(axis=(-2, -1)) / n_elements
+        mean_rmse = torch.sqrt(mean_rmse.mean(dim=-1)).mean()
+
+        return mean_rmse
 
     def on_validation_epoch_end(self) -> None:
         """To run at the end of the validation epoch."""
-        # Update scheduler
         scheduler_generator, scheduler_critic = self.lr_schedulers()
         scheduler_generator.step()
         scheduler_critic.step()
@@ -616,32 +613,29 @@ class SWIGAN(LightningModule):
     def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[Any]]:
         """Configure the optimizers."""
         optimizer_generator = self.hparams.optim(
-            list(self.frame_encoder.parameters())
-            + list(self.frame_decoder.parameters())
-            + list(self.temporal_encoder.parameters())
-            + list(self.temporal_decoder.parameters())
-            + list(self.Q_net.parameters()),
+            self.generator.parameters(),
             lr=self.hparams.lr,
             weight_decay=self.hparams.weight_decay,
+            betas=(0.5, 0.999),
         )
         optimizer_critic = self.hparams.optim(
             list(self.base_critic.parameters())
             + list(self.patch_critic.parameters())
-            + list(self.frame_critic.parameters())
-            + list(self.temporal_critic.parameters()),
+            + list(self.frame_critic.parameters()),
             lr=self.hparams.lr,
             weight_decay=self.hparams.weight_decay,
+            betas=(0.5, 0.999),
         )
 
         scheduler_generator = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer_generator,
             T_max=self.hparams.max_epochs,
-            eta_min=0,
+            eta_min=self.hparams.min_lr,
         )
         scheduler_critic = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer_critic,
             T_max=self.hparams.max_epochs,
-            eta_min=0,
+            eta_min=self.hparams.min_lr,
         )
 
         return [optimizer_generator, optimizer_critic], [scheduler_generator, scheduler_critic]
