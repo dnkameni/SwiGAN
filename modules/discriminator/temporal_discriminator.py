@@ -1,15 +1,15 @@
-"""Module containing the frame level discriminator."""
+"""Module containing the temporal level discriminator."""
 
 from __future__ import annotations
 
 import torch
 from torch import nn
 
-from swigan.models.base_conv_blocks import single_conv_block
+from modules.utils import single_conv3d_block
 
 
-class FrameDiscriminator(nn.Module):
-    """The frame level discriminator."""
+class TemporalDiscriminator(nn.Module):
+    """The temporal level discriminator."""
 
     def __init__(self, input_channels: int) -> None:
         """Initialize the input parameters.
@@ -20,33 +20,25 @@ class FrameDiscriminator(nn.Module):
 
         """
         super().__init__()
-        self.conv1 = single_conv_block(
+        self.conv1 = single_conv3d_block(
             in_channels=input_channels,
             out_channels=input_channels,
             kernel_size=2,
             dropout=0.0,
             normalization="instancenorm",
             padding=0,
+            stride=1,
+        )
+        self.conv2 = single_conv3d_block(
+            in_channels=input_channels,
+            out_channels=input_channels,
+            kernel_size=2,
+            dropout=0.0,
+            normalization="instancenorm",
+            padding=1,
             stride=2,
         )
-        self.conv2 = single_conv_block(
-            in_channels=input_channels,
-            out_channels=input_channels,
-            kernel_size=2,
-            dropout=0.0,
-            normalization="instancenorm",
-            padding=0,
-            stride=1,
-        )
-        self.final_conv = single_conv_block(
-            in_channels=input_channels,
-            out_channels=1,
-            kernel_size=1,
-            dropout=0.0,
-            normalization=None,
-            padding=0,
-            stride=1,
-        )
+        self.fc_layer = nn.Linear(input_channels, 1)
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         """Forward pass.
@@ -61,10 +53,7 @@ class FrameDiscriminator(nn.Module):
             A tensor of shape (batch_size, seq_len, 1)
 
         """
-        batch_size, length, channels, height, width = inputs.shape
-        out = inputs.reshape(batch_size * length, channels, height, width)
-        out = self.conv1(out)
+        out = self.conv1(inputs.transpose(1, 2))
         out = self.conv2(out)
-        out = self.final_conv(out)
-        out = out[..., 0, 0]
+        out = self.fc_layer(out.mean(dim=(-3, -2, -1)))
         return out

@@ -8,18 +8,15 @@ import torch
 from lightning import LightningModule
 from torch import autograd, nn
 
-from swigan.models.discriminator.base_discriminator import (
+from modules.discriminator import (
     BaseDiscriminator,
+    FrameDiscriminator,
+    PatchGANDiscriminator,
+    TemporalDiscriminator,
 )
-from swigan.models.discriminator.frame_discriminator import FrameDiscriminator
-from swigan.models.discriminator.info_gan_network import InfoGANNetwork
-from swigan.models.discriminator.patch_gan_discriminator import PatchGANDiscriminator
-from swigan.models.discriminator.temporal_discriminator import TemporalDiscriminator
-from swigan.models.generator.decoder import FrameDecoder
-from swigan.models.generator.encoder import FrameEncoder
-from swigan.models.generator.temporal_decoder import TemporalDecoder
-from swigan.models.generator.temporal_encoder import TemporalEncoder
-from swigan.models.utils import ModelFlavour
+from modules.discriminator.info_gan_network import InfoGANNetwork
+from modules.generator import FrameDecoder, FrameEncoder, TemporalDecoder, TemporalEncoder
+from modules.utils import ModelFlavour
 
 
 class SWIGAN(LightningModule):
