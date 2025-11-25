@@ -5,7 +5,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from swigan.models.utils import single_conv2d_block
+from swigan.models.base_conv_blocks import single_conv_block
 
 
 class FrameDiscriminator(nn.Module):
@@ -20,7 +20,7 @@ class FrameDiscriminator(nn.Module):
 
         """
         super().__init__()
-        self.conv1 = single_conv2d_block(
+        self.conv1 = single_conv_block(
             in_channels=input_channels,
             out_channels=input_channels,
             kernel_size=2,
@@ -29,7 +29,7 @@ class FrameDiscriminator(nn.Module):
             padding=0,
             stride=2,
         )
-        self.conv2 = single_conv2d_block(
+        self.conv2 = single_conv_block(
             in_channels=input_channels,
             out_channels=input_channels,
             kernel_size=2,
@@ -38,7 +38,7 @@ class FrameDiscriminator(nn.Module):
             padding=0,
             stride=1,
         )
-        self.final_conv = single_conv2d_block(
+        self.final_conv = single_conv_block(
             in_channels=input_channels,
             out_channels=1,
             kernel_size=1,

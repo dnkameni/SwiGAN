@@ -5,7 +5,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from swigan.models.utils import single_conv2d_block
+from swigan.models.base_conv_blocks import single_conv_block
 
 
 class BaseDiscriminator(nn.Module):
@@ -23,7 +23,7 @@ class BaseDiscriminator(nn.Module):
 
         """
         super().__init__()
-        self.conv1 = single_conv2d_block(
+        self.conv1 = single_conv_block(
             in_channels=input_channels,
             out_channels=16,
             kernel_size=3,
@@ -32,7 +32,7 @@ class BaseDiscriminator(nn.Module):
             padding=1,
             stride=2,
         )
-        self.conv2 = single_conv2d_block(
+        self.conv2 = single_conv_block(
             in_channels=16,
             out_channels=32,
             kernel_size=3,
@@ -41,7 +41,7 @@ class BaseDiscriminator(nn.Module):
             padding=1,
             stride=2,
         )
-        self.conv3 = single_conv2d_block(
+        self.conv3 = single_conv_block(
             in_channels=32,
             out_channels=64,
             kernel_size=3,
