@@ -5,11 +5,12 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from modules.base_conv_blocks import single_conv_block
+from modules.base_conv_blocks import single_discriminator_conv_block
+from modules.utils import glorot_init
 
 
 class PatchGANDiscriminator(nn.Module):
-    """The patchGAN discriminator. Patches of (4, 5) are considered."""
+    """The patchGAN discriminator. Patches of (5, 6) are considered."""
 
     def __init__(self, input_channels: int) -> None:
         """Initialize the input parameters.
@@ -20,26 +21,30 @@ class PatchGANDiscriminator(nn.Module):
 
         """
         super().__init__()
-        self.conv = single_conv_block(
+
+        self.conv = single_discriminator_conv_block(
             in_channels=input_channels,
-            out_channels=input_channels,
-            kernel_size=1,
+            out_channels=input_channels * 2,
+            kernel_size=2,
             dropout=0.0,
             normalization="instancenorm",
             padding=0,
             stride=1,
         )
-        self.final_conv = single_conv_block(
-            in_channels=input_channels,
+
+        self.final_conv = single_discriminator_conv_block(
+            in_channels=input_channels * 2,
             out_channels=1,
             kernel_size=1,
             dropout=0.0,
             normalization=None,
             padding=0,
             stride=1,
+            activation=False,
         )
+        self.apply(glorot_init)
 
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+    def forward(self, inputs: torch.Tensor) -> tuple[torch.Tensor, list[torch.Tensor]]:
         """Forward pass.
 
         Args:
@@ -51,9 +56,8 @@ class PatchGANDiscriminator(nn.Module):
             A tensor of shape (batch_size, seq_len, 1).
 
         """
-        batch_size, length, channels, height, width = inputs.shape
-        out = inputs.reshape(batch_size * length, channels, height, width)
-        out = self.conv(out)
-        out = self.final_conv(out)  # (B, 64, 5, 6)
-        out = out.reshape(batch_size, length, *out.shape[-3:])
-        return out.mean(dim=(-2, -1))
+        features = []
+        out = self.conv(inputs)
+        features.append(out)
+        out = self.final_conv(out)  # (B, 64, 4, 5)
+        return out, features

@@ -5,7 +5,8 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from modules.base_conv_blocks import single_conv_block
+from modules.base_conv_blocks import single_discriminator_conv_block
+from modules.utils import glorot_init
 
 
 class FrameDiscriminator(nn.Module):
@@ -20,35 +21,38 @@ class FrameDiscriminator(nn.Module):
 
         """
         super().__init__()
-        self.conv1 = single_conv_block(
+        self.conv1 = single_discriminator_conv_block(
             in_channels=input_channels,
-            out_channels=input_channels,
+            out_channels=input_channels * 2,
+            kernel_size=2,
+            dropout=0.0,
+            normalization="instancenorm",
+            padding=0,
+            stride=1,
+        )
+        self.conv2 = single_discriminator_conv_block(
+            in_channels=input_channels * 2,
+            out_channels=input_channels * 2,
             kernel_size=2,
             dropout=0.0,
             normalization="instancenorm",
             padding=0,
             stride=2,
         )
-        self.conv2 = single_conv_block(
-            in_channels=input_channels,
-            out_channels=input_channels,
-            kernel_size=2,
-            dropout=0.0,
-            normalization="instancenorm",
-            padding=0,
-            stride=1,
-        )
-        self.final_conv = single_conv_block(
-            in_channels=input_channels,
+
+        self.final_conv = single_discriminator_conv_block(
+            in_channels=input_channels * 2,
             out_channels=1,
-            kernel_size=1,
+            kernel_size=2,
             dropout=0.0,
             normalization=None,
             padding=0,
-            stride=1,
+            stride=2,
+            activation=False,
         )
+        self.apply(glorot_init)
 
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+    def forward(self, inputs: torch.Tensor) -> tuple[torch.Tensor, list[torch.Tensor]]:
         """Forward pass.
 
         Args:
@@ -61,10 +65,11 @@ class FrameDiscriminator(nn.Module):
             A tensor of shape (batch_size, seq_len, 1)
 
         """
-        batch_size, length, channels, height, width = inputs.shape
-        out = inputs.reshape(batch_size * length, channels, height, width)
-        out = self.conv1(out)
+        features = []
+        out = self.conv1(inputs)
+        features.append(out)
         out = self.conv2(out)
+        features.append(out)
         out = self.final_conv(out)
-        out = out[..., 0, 0]
-        return out
+
+        return out.squeeze(-1).squeeze(-1), features
