@@ -5,7 +5,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from swigan.models.base_conv_blocks import single_conv_block
+from modules.base_conv_blocks import single_conv_block
 
 
 class PatchGANDiscriminator(nn.Module):

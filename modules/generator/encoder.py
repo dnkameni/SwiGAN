@@ -5,7 +5,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from swigan.models.utils import SCSEModule, single_conv2d_block
+from modules.utils import SCSEModule, single_conv2d_block
 
 
 class CenterBlock(nn.Sequential):

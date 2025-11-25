@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from torchvision.transforms.functional import center_crop
 
-from swigan.models.utils import SCSEModule, single_conv2d_block
+from modules.utils import SCSEModule, single_conv2d_block
 
 
 class DecoderBlock(nn.Module):
