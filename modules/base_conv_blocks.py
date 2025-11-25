@@ -13,7 +13,7 @@ def single_conv_block(
     dropout: float = 0.3,
     stride: int = 1,
     padding: str | int = 1,
-    activation: bool = True,
+    activation: bool | None = True,
 ) -> nn.Module:
     """Single convolutional building block.
 
