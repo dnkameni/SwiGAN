@@ -50,3 +50,5 @@ logging:
   save_top_k_checkpoints: 10
   save_directory: null
   log_every_n_steps: 1
+  log_figures_every_n_epochs: 20
+  num_months_per_plots: 6

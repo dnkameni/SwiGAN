@@ -175,9 +175,9 @@ def build_train_val_test_datasets(
     targets_test = np.where(mask.squeeze(), targets_test, 0.0)
 
     train_dataset = SWIDataset(
-        maps_feats=maps_train,
-        target_maps=targets_train,
-        timestamps=timestamps_train,
+        maps_feats=maps_train[:100],
+        target_maps=targets_train[:100],
+        timestamps=timestamps_train[:100],
         mask=mask,
         num_input_steps=num_input_steps,
     )

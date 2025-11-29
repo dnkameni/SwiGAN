@@ -17,6 +17,7 @@ from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 
 from swigan.engines.swigan_lit import TTTSWIGAN
+from utils.callbacks import RandomTimeStepMapCallback
 from utils.preprocessing import dataframe_to_rasters, fill_all_missing_pixels
 from utils.swi_dataset import build_train_val_test_datasets
 
@@ -164,7 +165,15 @@ def main(cfg: DictConfig) -> None:
             monitor="val/generator_rmse_epoch",
             every_n_epochs=logging_cfg["save_checkpoint_every_n_epoch"],
             save_top_k=logging_cfg["save_top_k_checkpoints"],
-        )
+        ),
+        RandomTimeStepMapCallback(
+            save_dir=os.path.join(save_dir, "figures"),
+            input_statistics=statistics,
+            train_dataset=splits["train"],
+            val_dataset=splits["val"],
+            print_every_n_epochs=logging_cfg["log_figures_every_n_epochs"],
+            num_months_per_plot=logging_cfg["num_months_per_plots"],
+        ),
     ]
 
     logger.info(f"Initializing Tensorboard logger at '{save_dir}/lightning_logs/version_0'")
