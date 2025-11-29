@@ -174,7 +174,6 @@ def build_train_val_test_datasets(
     targets_val = np.where(mask.squeeze(), targets_val, 0.0)
     targets_test = np.where(mask.squeeze(), targets_test, 0.0)
 
-    # Division du dataset
     train_dataset = SWIDataset(
         maps_feats=maps_train,
         target_maps=targets_train,
@@ -201,8 +200,8 @@ def build_train_val_test_datasets(
         {"train": train_dataset, "val": val_dataset, "test": test_dataset},
         {
             "feats_mean": mean_value,
-            "feat_std": std_value,
+            "feats_std": std_value,
             "targets_mean": targets_mean_value,
-            "target_std": targets_std_value,
+            "targets_std": targets_std_value,
         },
     )
