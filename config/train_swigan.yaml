@@ -1,0 +1,52 @@
+experiment_name: "swigan_batch_size_64"
+
+dataset:
+  filepath: "/home/didier/Downloads/data_train.parquet"
+  fill_missing_pixels: true
+  input_columns:
+    - "evspsblpotAdjust-FAO"
+    - "evspsblpotAdjust-Hg0175"
+    - "hussAdjust"
+    - "prtotAdjust_max"
+    - "prtotAdjust_sum"
+    - "prtotAdjust_avg"
+    - "rldsAdjust"
+    - "rsdsAdjust"
+    - "tasAdjust"
+    - "tasmaxAdjust"
+    - "tasminAdjust"
+  target_column: "swi_u"
+  map_dimensions: (37, 44)
+  x_dim_column: null
+  y_dim_column: null
+
+train:
+  seed: 60
+  checkpoint_path: null
+  train_ratio: 0.92
+  val_ratio: 0.04
+  batch_size: 64
+  input_steps: 8
+  num_epochs: 1500
+  noise_dim: 32
+  encoder_channels: [64, 128, 256, 256, 256]
+  decoder_channels: [256, 256, 256, 128, 64]
+  timestamps_dim: 5
+  spatial_dropout: 0.
+  apply_center_block: true
+  start_lr: 5e-5
+  end_lr: 1e-7
+  weight_decay: 1e-1
+  loss_fn: "l1"
+  normalization: "batchnorm"
+  num_critic_iterations_per_epoch: 5
+  lambda_penalty: 10.0
+  image_distance_weight: 100.0
+  feature_matching_weight: 10.0
+  num_workers: 12
+
+logging:
+  save_checkpoint_every_n_epoch: 10
+  save_top_k_checkpoints: 10
+  save_directory: null
+  log_every_n_steps: 1

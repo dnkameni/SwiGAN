@@ -32,7 +32,7 @@ class SWIDataset(Dataset):
 
         """
         self.num_input_steps = num_input_steps
-        self.mask = torch.tensor(mask)
+        self.mask = torch.tensor(mask).float()
         self.samples = self._build_samples(
             torch.tensor(maps_feats) * self.mask[None, ...],
             torch.tensor(target_maps) * self.mask[None, ...],
@@ -58,8 +58,8 @@ class SWIDataset(Dataset):
                         target_maps[i - self.num_input_steps : i, 0],
                     ],
                     dim=0,
-                ),
-                "target_maps": target_maps[i],
+                ).float(),
+                "target_maps": target_maps[i].float(),
                 "timestamps": timestamps[i],
             }
             for i in range(self.num_input_steps, len(input_maps))
