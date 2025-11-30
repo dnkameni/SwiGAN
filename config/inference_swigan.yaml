@@ -1,0 +1,30 @@
+dataset:
+  filepath: "/home/didier/Downloads/data_merged_rcp85.parquet"
+  fill_missing_pixels: true
+  input_columns:
+    - "evspsblpotAdjust-FAO"
+    - "evspsblpotAdjust-Hg0175"
+    - "hussAdjust"
+    - "prtotAdjust_max"
+    - "prtotAdjust_sum"
+    - "prtotAdjust_avg"
+    - "rldsAdjust"
+    - "rsdsAdjust"
+    - "tasAdjust"
+    - "tasmaxAdjust"
+    - "tasminAdjust"
+  target_column: "swi_u"
+  x_dim_column: null
+  y_dim_column: null
+  starting_year: 2025
+  starting_month: 1
+
+model:
+  checkpoint_path: "/home/didier/Downloads/swigan_15M_params.ckpt"
+  train_dataset_statistics_path: "/home/didier/Downloads/train_dataset_statistics.npz"
+  saving_path: "testing_inference"
+  loss_fn: "l1"
+  num_trajectories: 10
+  num_trajectories_per_batch: 5
+  noise_std: 1.0
+  dtype: "float16"
