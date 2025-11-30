@@ -176,6 +176,9 @@ def main(cfg: DictConfig) -> None:
         ),
     ]
 
+    # Saving train dataset statistics
+    np.savez(os.path.join(save_dir, "train_dataset_statistics"), **statistics)
+
     logger.info(f"Initializing Tensorboard logger at '{save_dir}/lightning_logs/version_0'")
     tb_logger = TensorBoardLogger(
         save_dir=save_dir,
