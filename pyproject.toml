@@ -4,12 +4,13 @@ requires = ["setuptools<78"]
 
 [project]
 authors = [
-  {name = "Dider Ngatcha", email = "bakouengit@gmail.com"},
-  {name = "Nkameni Daniel", email = "nkamenidaniel2035@gmail.com"}
+  {name = "Didier Ngatcha", email = "bakouengit@gmail.com"}
 ]
 dependencies = [
   "numpy >= 1.26.4, <2.3.0",
   "pandas >= 2.2.3, <2.3.0",
+  "pyarrow >= 21.0.0",
+  "fastparquet >= 2024.2.0",
   "tqdm >= 4.65.0, < 5",
   "scikit-learn >= 1.6.1, <2",
   "hydra-core >= 1.3.2, <1.4",
@@ -18,7 +19,8 @@ dependencies = [
   "torchvision == 0.20.1",
   "torchaudio ==2.5.1",
   "torchmetrics >= 1.0.3, <2",
-  "lightning == 2.5.1"
+  "lightning == 2.5.1",
+  "tensorboard >= 2.20.0"
 ]
 description = "Packages for generative SWI models"
 name = "swigan"

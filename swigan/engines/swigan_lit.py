@@ -302,7 +302,6 @@ class TTTSWIGAN(LightningModule):
         )
         device = input_maps.device
         # Generate fake images
-
         if self.training:
             input_maps, target_maps, mask = self.transforms(input_maps, target_maps, mask)
 
@@ -566,9 +565,13 @@ class TTTSWIGAN(LightningModule):
         mask: torch.Tensor,
     ) -> torch.Tensor:
         """Compute mean symmetric absolute percentage error."""
+        targets_mean_value, targets_std_value = (
+            self.input_statistics["targets_mean"],
+            self.input_statistics["targets_std"],
+        )
         mean_v, std_v = (
-            torch.tensor(self.targets_mean_value).to(y_true.device),
-            torch.tensor(self.targets_std_value).to(y_true.device),
+            torch.tensor(targets_mean_value).to(y_true.device),
+            torch.tensor(targets_std_value).to(y_true.device),
         )
 
         y_true_p, y_pred_p = y_true * std_v + mean_v, y_pred * std_v + mean_v
@@ -589,9 +592,13 @@ class TTTSWIGAN(LightningModule):
     ) -> torch.Tensor:
         """Compute spatial RMSE per predictions timestep."""
         n_elements = mask.sum(dim=(-2, -1))
+        targets_mean_value, targets_std_value = (
+            self.input_statistics["targets_mean"],
+            self.input_statistics["targets_std"],
+        )
         mean_v, std_v = (
-            torch.tensor(self.targets_mean_value).to(y_true.device),
-            torch.tensor(self.targets_std_value).to(y_true.device),
+            torch.tensor(targets_mean_value).to(y_true.device),
+            torch.tensor(targets_std_value).to(y_true.device),
         )
 
         y_true_p, y_pred_p = y_true * std_v + mean_v, y_pred * std_v + mean_v
